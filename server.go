@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"time"
 	"zrpc/codec"
 )
 
@@ -129,6 +130,7 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 }
 
 func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body interface{}, sending *sync.Mutex) {
+	time.Sleep(time.Second)
 	sending.Lock()
 	defer sending.Unlock()
 	if err := cc.Write(h, body); err != nil {
