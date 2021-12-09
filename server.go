@@ -40,7 +40,7 @@ func (server *Server) Accept(lis net.Listener) {
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
-			log.Println("rpc server: accept error:", err)
+			log.Println("[rpc server]: accept error:", err)
 			return
 		}
 		go server.ServeConn(conn)
@@ -52,16 +52,16 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 	defer conn.Close()
 	var opt Option
 	if err := json.NewDecoder(conn).Decode(&opt); err != nil {
-		log.Println("rpc server: decode options error:", err)
+		log.Println("[rpc server]: decode options error:", err)
 		return
 	}
 	if opt.MagicNumber != MagicNumber {
-		log.Printf("rpc server: invalid magic number %x", opt.MagicNumber)
+		log.Printf("[rpc server]: invalid magic number %x", opt.MagicNumber)
 		return
 	}
 	f := codec.NewCodecFuncMap[opt.CodecType]
 	if f == nil {
-		log.Printf("rpc server: invalid codec type %q", opt.CodecType)
+		log.Printf("[rpc server]: invalid codec type %q", opt.CodecType)
 		return
 	}
 	server.serveRequests(f(conn))
@@ -98,7 +98,7 @@ func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	var h codec.Header
 	if err := cc.ReadHeader(&h); err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
-			log.Println("rpc server: read header error:", err)
+			log.Println("[rpc server]: read header error:", err)
 		}
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 	// TODO: use correct type
 	req.argv = reflect.New(reflect.TypeOf(""))
 	if err := cc.ReadBody(req.argv.Interface()); err != nil {
-		log.Println("rpc server: read argv err:", err)
+		log.Println("[rpc server]: read argv err:", err)
 		return req, err
 	}
 	return req, nil
@@ -132,7 +132,7 @@ func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body interfa
 	sending.Lock()
 	defer sending.Unlock()
 	if err := cc.Write(h, body); err != nil {
-		log.Println("rpc server: write response error:", err)
+		log.Println("[rpc server]: write response error:", err)
 	}
 }
 
