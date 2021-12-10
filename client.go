@@ -84,7 +84,7 @@ func (client *Client) terminateCalls(err error) {
 	client.sending.Lock()
 	defer client.sending.Unlock()
 	client.mu.Lock()
-	defer client.sending.Unlock()
+	defer client.mu.Unlock()
 	client.shutdown = true
 	for _, call := range client.pending {
 		call.Error = err
