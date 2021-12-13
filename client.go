@@ -1,6 +1,7 @@
 package zrpc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 	"zrpc/codec"
 )
 
@@ -160,9 +162,15 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 	return call
 }
 
-func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
-	call := <-client.Go(serviceMethod, args, reply, nil).Done
-	return call.Error
+func (client *Client) Call(ctx context.Context, serviceMethod string, args, reply interface{}) error {
+	call := client.Go(serviceMethod, args, reply, nil)
+	select {
+	case <-ctx.Done():
+		client.removeCall(call.Seq)
+		return errors.New("[rpc client]: called failed: " + ctx.Err().Error())
+	case call = <-call.Done:
+		return call.Error
+	}
 }
 
 func NewClient(conn net.Conn, opt *Option) (*Client, error) {
@@ -206,19 +214,47 @@ func parseOptions(opts ...*Option) (*Option, error) {
 	return opt, nil
 }
 
-func Dial(network, address string, opts ...*Option) (client *Client, err error) {
+type clientResult struct {
+	client *Client
+	err    error
+}
+
+type newClientFunc func(conn net.Conn, opt *Option) (*Client, error)
+
+func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := net.Dial(network, address)
+	conn, err := net.DialTimeout(network, address, opt.ConnectTimeout)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if client == nil {
+		if err != nil {
 			conn.Close()
 		}
 	}()
-	return NewClient(conn, opt)
+	ch := make(chan clientResult)
+	go func() {
+		c, err := f(conn, opt)
+		ch <- clientResult{
+			client: c,
+			err:    err,
+		}
+	}()
+	if opt.ConnectTimeout == 0 {
+		res := <-ch
+		return res.client, res.err
+	}
+	select {
+	case <-time.After(opt.ConnectTimeout):
+		return nil, fmt.Errorf("[rpc client]: connect timeout: expect within %s", opt.ConnectTimeout)
+	case res := <-ch:
+		return res.client, res.err
+	}
+}
+
+func Dial(network, address string, opts ...*Option) (client *Client, err error) {
+	return dialTimeout(NewClient, network, address, opts...)
 }
