@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -36,6 +37,12 @@ type request struct {
 	svc          *service
 }
 
+const (
+	connected        = "200 Connected to Z-RPC"
+	defaultRPCPath   = "/_zrpc_/"
+	defaultDebugPath = "/debug/zrpc"
+)
+
 type Server struct {
 	serviceMap sync.Map
 }
@@ -63,6 +70,32 @@ func (server *Server) Register(rcvr interface{}) error {
 		return errors.New("[rpc server]: service already defined: " + s.name)
 	}
 	return nil
+}
+
+func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodConnect {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("rpc hijacking ", req.RemoteAddr, ":", err.Error())
+		return
+	}
+	_, err = io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
+	if err != nil {
+		log.Print("[rpc server]: write failed: ", err.Error())
+		return
+	}
+	server.ServeConn(conn)
+}
+
+func (server *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, server)
+	http.Handle(defaultDebugPath, debugHTTP{server})
+	log.Println("rpc server debug path:", defaultDebugPath)
 }
 
 // ServeConn runs the server on a single connection.
@@ -99,7 +132,7 @@ func (server *Server) serveRequests(cc codec.Codec, timeout time.Duration) {
 	for {
 		req, err := server.readRequest(cc)
 		if err != nil {
-			if req == nil {
+			if req == nil || err == io.EOF {
 				break // it's not possible to recovery, so close the connection
 			}
 			req.h.Error = err.Error()
@@ -165,6 +198,7 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 	if timeout == 0 {
 		<-called
 		<-sent
+		return
 	}
 	select {
 	case <-time.After(timeout):
@@ -176,10 +210,10 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 }
 
 func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body interface{}, sending *sync.Mutex) {
-	time.Sleep(time.Second)
 	sending.Lock()
 	defer sending.Unlock()
 	if err := cc.Write(h, body); err != nil {
+		log.Printf("%#v\n", h)
 		log.Println("[rpc server]: write response error:", err)
 	}
 }
@@ -210,4 +244,8 @@ func Accept(lis net.Listener) {
 
 func Register(rcvr interface{}) error {
 	return DefaultServer.Register(rcvr)
+}
+
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
 }

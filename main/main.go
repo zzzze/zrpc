@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 	"zrpc"
@@ -24,19 +25,22 @@ func startServer(addr chan string) {
 		log.Fatal("register error:", err)
 	}
 	// pick a free port
-	l, err := net.Listen("tcp", ":0")
+	// l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", ":9999")
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
 	log.Println("start rpc server on", l.Addr())
+	zrpc.HandleHTTP()
 	addr <- l.Addr().String()
-	zrpc.Accept(l)
+	// zrpc.Accept(l)
+	http.Serve(l, nil)
 }
 
-func main() {
-	addr := make(chan string)
-	go startServer(addr)
-	client, err := zrpc.Dial("tcp", <-addr)
+func call(addr chan string) {
+	// go startServer(addr)
+	// client, err := zrpc.Dial("tcp", <-addr)
+	client, err := zrpc.DialHTTP("tcp", <-addr)
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
@@ -57,4 +61,11 @@ func main() {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func main() {
+	log.SetFlags(0)
+	addr := make(chan string)
+	go call(addr)
+	startServer(addr)
 }

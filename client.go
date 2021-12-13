@@ -1,6 +1,7 @@
 package zrpc
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 	"zrpc/codec"
@@ -257,4 +259,23 @@ func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (cli
 
 func Dial(network, address string, opts ...*Option) (client *Client, err error) {
 	return dialTimeout(NewClient, network, address, opts...)
+}
+
+func NewHTTPClient(conn net.Conn, opt *Option) (*Client, error) {
+	_, err := io.WriteString(conn, fmt.Sprintf("%s %s HTTP/1.0\n\n", http.MethodConnect, defaultRPCPath))
+	if err != nil {
+		log.Println("[rcp client]: write failed: ", err.Error())
+		return nil, err
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
+	if err == nil && resp.Status == connected {
+		return NewClient(conn, opt)
+	} else if err == nil {
+		err = errors.New("unexpected HTTP response: " + resp.Status)
+	}
+	return nil, err
+}
+
+func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
+	return dialTimeout(NewHTTPClient, network, address, opts...)
 }
