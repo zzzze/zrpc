@@ -4,9 +4,11 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 	"zrpc"
+	"zrpc/registry"
 	"zrpc/xclient"
 )
 
@@ -54,7 +56,7 @@ func (f Foo) Sleep(args Args, reply *int) error {
 // 	zrpc.Accept(l)
 // }
 
-func startServer(addr chan string) {
+func startServer(registryAddr string, wg *sync.WaitGroup) {
 	var foo Foo
 	// pick a free port
 	l, err := net.Listen("tcp", ":0")
@@ -65,9 +67,27 @@ func startServer(addr chan string) {
 	if err := server.Register(&foo); err != nil {
 		log.Fatal("register error:", err)
 	}
+	registry.Heartbeat(registryAddr, "tcp://"+l.Addr().String(), 0)
 	log.Println("start rpc server on", l.Addr())
-	addr <- l.Addr().String()
+	wg.Done()
 	server.Accept(l)
+}
+
+func startRegistry(wg *sync.WaitGroup) {
+	registry.HandleHTTP()
+	wg.Done()
+	if err := http.ListenAndServe(":9999", nil); err != nil {
+		log.Fatalf("start registry err: %+v", err)
+	}
+	// l, err := net.Listen("tcp", ":9999")
+	// if err != nil {
+	// 	log.Fatal("network error:", err)
+	// }
+	// registry.HandleHTTP()
+	// wg.Done()
+	// if err := http.Serve(l, nil); err != nil {
+	// 	log.Fatal("start registry err:", err)
+	// }
 }
 
 // func call(addr chan string) {
@@ -113,11 +133,8 @@ func foo(ctx context.Context, c *xclient.XClient, typ, serviceMethod string, arg
 	}
 }
 
-func call(addr1, addr2 string) {
-	d := xclient.NewMultiServersDiscovery([]string{
-		"tcp://" + addr1,
-		"tcp://" + addr2,
-	})
+func call(registry string) {
+	d := xclient.NewZRegistryDiscovery(registry, 0)
 	c := xclient.NewXClient(d, xclient.RandomSelect, nil)
 	defer c.Close()
 	var wg sync.WaitGroup
@@ -131,11 +148,8 @@ func call(addr1, addr2 string) {
 	wg.Wait()
 }
 
-func broadcast(addr1, addr2 string) {
-	d := xclient.NewMultiServersDiscovery([]string{
-		"tcp://" + addr1,
-		"tcp://" + addr2,
-	})
+func broadcast(registry string) {
+	d := xclient.NewZRegistryDiscovery(registry, 0)
 	c := xclient.NewXClient(d, xclient.RandomSelect, nil)
 	defer c.Close()
 	var wg sync.WaitGroup
@@ -154,14 +168,23 @@ func broadcast(addr1, addr2 string) {
 
 func main() {
 	log.SetFlags(0)
-	ch1 := make(chan string)
-	ch2 := make(chan string)
-	go startServer(ch1)
-	go startServer(ch2)
-	addr1 := <-ch1
-	addr2 := <-ch2
+	// ch1 := make(chan string)
+	// ch2 := make(chan string)
+	var wg sync.WaitGroup
+	registryAddr := "http://localhost:9999/_zrpc_/registry"
+	wg.Add(1)
+	go startRegistry(&wg)
+	wg.Wait()
 
 	time.Sleep(time.Second)
-	call(addr1, addr2)
-	broadcast(addr1, addr2)
+	wg.Add(2)
+	go startServer(registryAddr, &wg)
+	go startServer(registryAddr, &wg)
+	wg.Wait()
+	// addr1 := <-ch1
+	// addr2 := <-ch2
+
+	time.Sleep(time.Second)
+	call(registryAddr)
+	broadcast(registryAddr)
 }
