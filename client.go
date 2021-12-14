@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 	"zrpc/codec"
@@ -278,4 +279,18 @@ func NewHTTPClient(conn net.Conn, opt *Option) (*Client, error) {
 
 func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
 	return dialTimeout(NewHTTPClient, network, address, opts...)
+}
+
+func XDial(rpcAddr string, opts ...*Option) (*Client, error) {
+	i := strings.Index(rpcAddr, "://")
+	if i == -1 {
+		return nil, fmt.Errorf("rcp client err: wrong format '%s', expect protocol://addr", rpcAddr)
+	}
+	protocol, addr := rpcAddr[:i], rpcAddr[i+3:]
+	switch protocol {
+	case "http":
+		return DialHTTP("tcp", addr, opts...)
+	default:
+		return Dial(protocol, addr, opts...)
+	}
 }

@@ -40,7 +40,8 @@ func startServer(addr chan string) {
 func call(addr chan string) {
 	// go startServer(addr)
 	// client, err := zrpc.Dial("tcp", <-addr)
-	client, err := zrpc.DialHTTP("tcp", <-addr)
+	// client, err := zrpc.DialHTTP("tcp", <-addr)
+	client, err := zrpc.XDial("http://" + <-addr)
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
